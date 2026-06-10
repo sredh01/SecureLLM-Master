@@ -131,5 +131,5 @@ The repository contains the complete data processing, retrieval, training, and b
 
 If you use SecureLLM in academic work, please cite:
 
-Redhouse, S., & Alsmadi, I. (2026).
+Redhouse, S. (2026).
 SecureLLM: A Retrieval Augmented Framework for Cybersecurity Intelligence Analysis.
