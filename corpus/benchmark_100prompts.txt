@@ -1,0 +1,105 @@
+I keep seeing CVE numbers in reports, can you tell me what they actually represent?
+A vulnerability report mentioned CVSS, so what is that score supposed to measure?
+People throw around the term CWE a lot, so where does that fit compared to CVE?
+Someone said a bug had public exploit code, what does that usually imply?
+A report called something remote code execution, and I want the plain meaning of that.
+After initial access, attackers often try privilege escalation, so what are they really gaining?
+Zero day gets used like a buzzword, but what makes a vulnerability a zero day?
+Malware analysts talk about families all the time, so what makes samples belong to the same family?
+An IOC showed up in an incident writeup, and I want to know what that means in practice.
+Security teams flagged command and control traffic, so what does that normally look like?
+Authentication bypass showed up in a bulletin, and I want to understand why that is serious.
+A researcher mentioned buffer overflow, but I want the simple security meaning, not the programming lecture.
+Injection flaws keep appearing in reports, so what is the core problem behind them?
+Ransomware is obvious at a high level, but what specifically makes it different from other malware?
+Persistence gets mentioned in malware analysis constantly, so what is the attacker trying to achieve there?
+Lateral movement sounds like a post compromise step, but what is actually happening during it?
+A scanner reported a high severity vulnerability, so what does severity really capture?
+Exploit reliability came up in a writeup, and I want to know why that matters.
+Threat intelligence sounds broad, so what kind of information usually falls under that label?
+Attack surface keeps showing up in security discussions, so what does it include?
+
+Remote code execution always gets treated as a major problem, can you walk me through why?
+Privilege escalation sounds bad by itself, but why does it change the situation so much for an attacker?
+Unpatched systems seem to get hit first, so why are they such attractive targets?
+Credential theft keeps showing up in real attacks, so why is it so useful to attackers?
+CVSS scores are everywhere, but why do defenders still rely on them despite their limits?
+Some organizations leave vulnerabilities open for a long time, so what usually causes that?
+Internet facing services get targeted constantly, and I want to understand the attacker logic there.
+Input validation seems basic, yet it prevents a lot of issues, so why is it so effective?
+Memory safety bugs often get high attention, so what makes them especially dangerous?
+Outdated software creates obvious risk, but explain the chain of problems it tends to introduce.
+Threat intelligence feeds cost time and money, so what value do they actually add for defenders?
+The moment exploit code becomes public, defenders get nervous, so why does that change the risk picture?
+Ransomware crews go after backups for a reason, and I want to know the strategic reason.
+Obfuscation keeps appearing in malware writeups, so what problem is it trying to solve for the attacker?
+Hashes show up in malware reports constantly, so explain why analysts care about them so much.
+
+A vulnerability and an exploit are related, but they are not the same thing, so separate them clearly.
+CVE and CVSS often appear together in the same report, but they do different jobs, right?
+Malware and exploit kits get lumped together sometimes, so draw the line between them.
+Risk and severity sound similar, yet security teams treat them differently, so compare them.
+Detection controls and prevention controls both matter, but how do they differ in practice?
+Static analysis and dynamic analysis both study malware, but the workflow is not the same, so compare them.
+Authentication and authorization get confused constantly, so give me the practical distinction.
+Vulnerability scanning and penetration testing sound related, but they are not interchangeable, so compare them.
+Exploit reliability and exploit complexity both affect danger, but not in the same way, so explain the difference.
+Known vulnerabilities and zero days create different defensive problems, so compare them.
+Signature based detection and behavior based detection each catch different things, so weigh them against each other.
+Patching and mitigation are both used as responses, but they are not identical, so compare them.
+Exposure and exploitability sound connected, but they are measuring different aspects, so separate them.
+Attacker capability and attacker intent both matter in risk analysis, but they are not the same variable, so compare them.
+Exploit development and exploit deployment sound similar at first, but they represent different phases, so explain that.
+
+Attackers go after internet exposed services first for a reason, so spell out the logic.
+Defenders watch for odd network behavior, and I want to know why that remains so useful.
+Organizations track CVE identifiers obsessively, so what do they gain from doing that?
+Exploit databases exist in the open, and that seems risky, so why do they still matter?
+Attackers reuse frameworks all the time, so why build on old exploit chains instead of starting fresh?
+Defenders run vulnerability scanners constantly, so what do those tools really help them accomplish?
+Attackers sometimes chain several weak points together, so why is that more powerful than using one bug alone?
+High severity does not always mean immediate exploitation, so why does that mismatch happen?
+Defenders care a lot about command and control traffic, so why is that such a revealing signal?
+Privilege escalation often happens after initial access, so why is it such a common next move?
+Patch management consumes a huge amount of organizational energy, so why is it worth prioritizing?
+Persistence mechanisms show up in many attacks, so why is staying on the system so important to the adversary?
+Malware hashes are used constantly in analysis, so why are defenders still relying on them?
+Authentication bypass is always treated as a major issue, so why does it carry so much weight?
+Some vulnerabilities stay hidden for years, and I want the reasons that usually allow that to happen.
+
+Suppose a service lets outsiders run arbitrary code remotely, what kind of damage does that open the door to?
+A company is still running software with several known flaws, so what kinds of consequences should they expect?
+A malware sample keeps reaching out to the same outside address, so what does that behavior suggest?
+Once exploit code is public, the situation changes fast, so describe how the risk profile shifts.
+Weak password authentication is still common in some places, so which attacks become easier because of it?
+Sensitive configuration files being exposed sounds bad, but explain the practical security fallout.
+Imagine an attacker gets limited access and then raises privileges, what changed in the attack path?
+Access control bypass showed up in an advisory, so what could an attacker do with that kind of weakness?
+An exposed service accepts unsanitized input from users, so which attack classes immediately come to mind?
+A malware sample tries to survive reboots and cleanup, so what is the attacker trying to preserve?
+Unauthorized modification of data points to a specific security failure, so which property is being broken?
+Publicly exposed debugging interfaces do not sound safe, so explain why they create risk.
+Someone pulled exploit code from a public repository and used it in an intrusion, what does that tell you about the threat?
+Denial of service does not always steal data, yet it still matters, so explain the operational impact.
+If a system has little visibility into suspicious activity, what risk grows because of that blind spot?
+
+SQL injection belongs in one category and not the other, so classify it correctly.
+CVSS is one kind of security artifact, not another, so identify which one it is.
+Ransomware fits a specific role in cyber operations, so classify it accurately.
+A hash has one primary purpose in this context, so choose between identification and encryption.
+Privilege escalation gets described in different ways, so place it in the most accurate category.
+A CVE entry serves one core function in the ecosystem, so identify it correctly.
+Authentication is usually treated as one type of control, so classify it.
+Patching belongs on one side of the defense workflow more than the other, so place it correctly.
+Exploit code has an obvious use case, so classify it the right way.
+Static analysis happens at a particular stage relative to execution, so identify that.
+Threat intelligence can support both planning and response, but it leans one direction here, so classify it.
+An indicator of compromise is evidence of something, not the prevention itself, so label it correctly.
+Vulnerability scanning is an assessment activity, but describe whether it is active or passive in this context.
+A payload shows up at a particular part of exploitation, so identify where it belongs.
+A command and control server sits on one side of the conflict, so classify it accurately.
+A proof of concept exploit is not the same thing as a fully weaponized campaign tool, so explain that distinction.
+Leaked credentials do not exploit a software flaw directly, so place them in the right attack context.
+Security misconfiguration often gets underestimated, so describe why it can be just as dangerous as a code bug.
+When defenders say a bug is easy to weaponize, what characteristics are they usually pointing to?
+A vulnerability with no available patch creates a special problem, so explain why defenders treat that differently.

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log
+*.out
+*.err
+slurm-*.out
+
+# Slurm Scripts
+sbatch_scripts/
+
+# Generated benchmark results
+benchmark/*.csv
+
+# Generated RAG artifacts
+index/
+*.faiss
+*.pkl
+
+# Model checkpoints and weights
+output/
+checkpoint-*/
+*.safetensors
+
+# Large datasets
+corpus/*.json
+corpus/*.jsonl
+
+# Cache
+.cache/
+
+# Temporary files
+tmp/
+temp/
+
+# OS files
+Thumbs.db
