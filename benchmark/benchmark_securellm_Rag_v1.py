@@ -1,9 +1,14 @@
 import csv
+import pickle
 import time
-import torch
-
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import faiss
+import numpy as np
+import torch
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # ==========================================================
@@ -19,6 +24,11 @@ LLAMA32_1B_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
 GEMMA2_2B_MODEL = "google/gemma-2-2b-it"
 PHI35_MINI_MODEL = "microsoft/Phi-3.5-mini-instruct"
 
+INDEX_FILE = BASE_DIR / "index" / "securellm_index_v1.faiss"
+CHUNKS_FILE = BASE_DIR / "index" / "securellm_chunks_v1.pkl"
+
+EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+TOP_K = 3
 MAX_NEW_TOKENS = 200
 
 MODELS = [
@@ -28,6 +38,8 @@ MODELS = [
         "gemma2_2b",
         "phi35_mini"
     ]
+
+CHECKPOINT_FILE = BASE_DIR / "data" / "securellm_rag_benchmark_checkpoint.csv"
 
 REFUSAL_PHRASES = [
         "i am unsure",
@@ -58,8 +70,6 @@ CATEGORIES = [
         "advanced_mixed_reasoning"
     ]
 
-CHECKPOINT_FILE = BASE_DIR / "data" / "securellm_nonRag_benchmark_checkpoint.csv"
-
 # ==========================================================
 # DEVICE
 # ==========================================================
@@ -68,9 +78,49 @@ def get_device():
     if torch.cuda.is_available():
         print("GPU detected:", torch.cuda.get_device_name(0))
         return "cuda"
-    else:
-        print("No GPU detected. Running in CPU mode.")
-        return "cpu"
+    print("No GPU detected. Running in CPU mode.")
+    return "cpu"
+
+# ==========================================================
+# LOAD RETRIEVAL
+# ==========================================================
+
+def load_retrieval():
+    print("Loading embedding model...")
+    embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+
+    print("Loading FAISS index...")
+    index = faiss.read_index(str(INDEX_FILE))
+
+    print("Loading chunk metadata...")
+    with open(CHUNKS_FILE, "rb") as f:
+        chunks = pickle.load(f)
+
+    print(f"Retrieval ready. Total chunks: {len(chunks)}")
+    return embed_model, index, chunks
+
+
+def retrieve_context(embed_model, index, chunks, query, top_k=TOP_K):
+    query_embedding = embed_model.encode(
+        [query],
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    ).astype(np.float32)
+
+    distances, indices = index.search(query_embedding, top_k)
+
+    retrieved_chunks = []
+    retrieved_sources = []
+
+    for idx in indices[0]:
+        if 0 <= idx < len(chunks):
+            item = chunks[idx]
+            retrieved_chunks.append(item["text"])
+            retrieved_sources.append(
+                f"{item.get('source', '')} | {item.get('record_id', '')} | chunk {item.get('chunk_id', '')}"
+            )
+
+    return retrieved_chunks, retrieved_sources, distances[0]
 
 # ==========================================================
 # LOAD MODEL
@@ -92,7 +142,6 @@ def load_model(model_name):
 
     model_path = model_map[model_name]
 
-    # Only models that actually require remote code
     use_remote_code = model_name in {
         "qwen_base",
         "securellm_domain_v1"
@@ -119,7 +168,6 @@ def load_model(model_name):
     if device == "cuda":
         load_kwargs["device_map"] = "auto"
 
-    # Force Phi onto eager attention instead of flash attention
     if is_phi:
         load_kwargs["attn_implementation"] = "eager"
 
@@ -169,52 +217,45 @@ def infer_prompt_category(prompt_id: int) -> str:
 # PROMPT
 # ==========================================================
 
-def build_prompt(user_prompt: str, tokenizer=None, model_name: str = "") -> str:
+def build_rag_prompt(user_prompt: str, context_chunks: list[str], tokenizer, model_name: str = "") -> str:
+    context_text = "\n\n".join(context_chunks)
     system_instruction = (
-        "You are SecureLLM, a cybersecurity focused language model. "
-        "Answer the question clearly and directly. "
-        "Do not invent facts. "
-        "If you are unsure, say that you are unsure."
+        "You are SecureLLM, a cybersecurity assistant. "
+        "Use only the context below to answer the question. "
+        "If the context does not support the answer, say you are unsure."
     )
+    user_msg = f"Context:\n{context_text}\n\nQuestion:\n{user_prompt}"
 
-    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
-        # Check if this tokenizer supports system role
-        # Phi-3.5, Llama, Qwen all do — but handle gracefully
+    messages = [
+        {"role": "system", "content": system_instruction},
+        {"role": "user", "content": user_msg},
+    ]
+
+    if getattr(tokenizer, "chat_template", None) is not None:
         try:
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt},
-            ]
             return tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
+                messages, tokenize=False, add_generation_prompt=True
             )
         except Exception:
-            # Fallback: fold system into user if template rejects system role
-            messages = [
-                {"role": "user", "content": f"{system_instruction}\n\n{user_prompt}"},
-            ]
+            messages = [{"role": "user", "content": f"{system_instruction}\n\n{user_msg}"}]
             return tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
+                messages, tokenize=False, add_generation_prompt=True
             )
 
-    # Raw fallback (no chat template)
+    # Raw fallback for models with no chat template (e.g. true base models)
     return (
-        f"<|system|>\n{system_instruction}<|end|>\n"
-        f"<|user|>\n{user_prompt}<|end|>\n"
-        f"<|assistant|>\n"
+        f"{system_instruction}\n\n"
+        f"{user_msg}\n\n"
+        f"Answer:\n"
     )
 
 # ==========================================================
 # GENERATE
 # ==========================================================
 
-def generate_response(model, tokenizer, prompt, model_name=""):
-    full_prompt = build_prompt(prompt, tokenizer, model_name=model_name)
-
+def generate_response(model, tokenizer, prompt, context_chunks, model_name=""):
+    full_prompt = build_rag_prompt(prompt, context_chunks, tokenizer, model_name=model_name)
+    
     model_device = next(model.parameters()).device
     inputs = tokenizer(
         full_prompt,
@@ -223,10 +264,10 @@ def generate_response(model, tokenizer, prompt, model_name=""):
         padding=True
     )
     inputs = {k: v.to(model_device) for k, v in inputs.items()}
-
+    
     is_phi = model_name == "phi35_mini"
     start = time.time()
-
+    
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -235,60 +276,75 @@ def generate_response(model, tokenizer, prompt, model_name=""):
             temperature=None,
             top_p=None,
             top_k=None,
-            repetition_penalty=1.3,      # stronger — 1.1 is too weak for Phi
-            no_repeat_ngram_size=4,       # hard-blocks looping n-grams
+            repetition_penalty=1.3,
+            no_repeat_ngram_size=4,
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
-            use_cache=not is_phi,
+            use_cache=True,
         )
-
+    
     latency = time.time() - start
-
+    
     prompt_len = inputs["input_ids"].shape[-1]
     decoded = tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
     response = decoded.strip()
-
+    
     for stop_token in ["Question:", "User:", "Assistant:", "### System:", "### User:"]:
         if stop_token in response:
             response = response.split(stop_token)[0].strip()
-
+    
     return response, latency
 
 # ==========================================================
-# LIGHTWEIGHT AUTO SIGNALS
+# EVALUATE
 # ==========================================================
 
 def contains_refusal(response: str) -> int:
     lower = response.lower()
     return int(any(p in lower for p in REFUSAL_PHRASES))
 
-def evaluate_lightweight(prompt, response):
-
+def evaluate(response, context_chunks, distances, embed_model):
     response_lower = response.lower()
     word_count = len(response.split())
 
+    response_embedding = embed_model.encode(
+        [response], convert_to_numpy=True, normalize_embeddings=True
+    )
+    context_embedding = embed_model.encode(
+        [" ".join(context_chunks)], convert_to_numpy=True, normalize_embeddings=True
+    )
+
+    similarity = cosine_similarity(response_embedding, context_embedding)[0][0]
     contains_refusal_phrases = contains_refusal(response)
+
+    hallucination_risk = int(similarity < 0.5 and contains_refusal_phrases == 0)
+
     cyber_term_hits = sum(1 for term in CYBER_TERMS if term in response_lower)
     uncertainty_hits = sum(1 for term in UNCERTAINTY_TERMS if term in response_lower)
-    
-    technical_density = (
-        round(cyber_term_hits / word_count, 4)
-        if word_count > 0 else 0
-    )
 
-    uncertainty_density = (
-        round(uncertainty_hits / word_count, 4)
-        if word_count > 0 else 0
-    )
+    technical_density = round(cyber_term_hits / word_count, 4) if word_count > 0 else 0
+    uncertainty_density = round(uncertainty_hits / word_count, 4) if word_count > 0 else 0
+
+    score = 0
+    if similarity > 0.65:
+        score += 3
+    if hallucination_risk == 0:
+        score += 2
+    if contains_refusal_phrases:
+        score += 1
 
     return {
+        "grounded_similarity": float(similarity),
+        "hallucination_risk": hallucination_risk,
+        "contains_refusal": contains_refusal_phrases,
+        "retrieval_avg_distance": float(np.mean(distances)),
         "response_length": len(response),
         "word_count": word_count,
         "cyber_term_hits": cyber_term_hits,
-        "contains_refusal": contains_refusal_phrases,
         "technical_density": technical_density,
         "uncertainty_hits": uncertainty_hits,
         "uncertainty_density": uncertainty_density,
+        "final_score": score,
     }
 
 # ==========================================================
@@ -316,10 +372,20 @@ def save_results(results, filename):
 # ==========================================================
 
 def run_benchmark(prompt_file=PROMPT_FILE):
-    with open(prompt_file, "r", encoding="utf-8") as f:
-        prompts = [p.strip() for p in f if p.strip()]
+    embed_model, index, chunks = load_retrieval()
+
+    #with open(prompt_file, "r", encoding="utf-8") as f:
+        #prompts = [p.strip() for p in f if p.strip()]
         #prompts = [p.strip() for p in f if p.strip()][:5]
-    print(f"Loaded {len(prompts)} prompts from {prompt_file}")
+    #print(f"Loaded {len(prompts)} prompts from {prompt_file}")
+    
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        all_prompts = [p.strip() for p in f if p.strip()]
+
+    prompts = all_prompts
+
+    print(f"Loaded {len(all_prompts)} total prompts from {prompt_file}")
+    print(f"Running prompts 1 to {len(all_prompts)}")
 
     results = []
 
@@ -334,14 +400,22 @@ def run_benchmark(prompt_file=PROMPT_FILE):
             prompt_type = infer_prompt_type(prompt)
             prompt_category = infer_prompt_category(prompt_id)
 
+            context_chunks, retrieved_sources, distances = retrieve_context(
+                embed_model,
+                index,
+                chunks,
+                prompt
+            )
+  
             response, latency = generate_response(
                 model,
                 tokenizer,
                 prompt,
+                context_chunks,
                 model_name=model_name
             )
 
-            auto_eval = evaluate_lightweight(prompt, response)
+            evaluation = evaluate(response, context_chunks, distances, embed_model)
 
             row = {
                 "prompt_id": prompt_id,
@@ -350,8 +424,9 @@ def run_benchmark(prompt_file=PROMPT_FILE):
                 "prompt_type": prompt_type,
                 "prompt": prompt,
                 "response": response,
+                "sources": " || ".join(retrieved_sources),
                 "latency_seconds": round(latency, 4),
-                **auto_eval,
+                **evaluation,
                 "manual_domain_relevance": "",
                 "manual_technical_correctness": "",
                 "manual_factuality": "",
@@ -376,17 +451,14 @@ def run_benchmark(prompt_file=PROMPT_FILE):
             torch.cuda.empty_cache()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = BASE_DIR / "data" / f"securellm_nonRag_benchmark_{timestamp}.csv"
+    output_file = BASE_DIR / "data" / f"securellm_rag_benchmark_{timestamp}.csv"
     save_results(results, output_file)
 
     print("\nBenchmark Complete.")
     print("Saved to:", output_file)
     print("Checkpoint file:", CHECKPOINT_FILE)
 
-# ==========================================================
-# MAIN
-# ==========================================================
 
 if __name__ == "__main__":
-    print("Starting SecureLLM Non Rag Benchmark...")
+    print("Starting SecureLLM RAG Benchmark...")
     run_benchmark()

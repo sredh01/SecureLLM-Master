@@ -10,55 +10,21 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 # CONFIG
 # ==========================================================
 
-BASE_DIR = Path("/home/sredhouse/THESIS/securellm_cluster_v1")
-PROMPT_FILE = BASE_DIR / "data" / "securellm_1000prompts_v1.txt"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROMPT_FILE = PROJECT_ROOT / "corpus" / "benchmark_100prompts.txt"
 
-SECURELLM_MODEL = "/home/sredhouse/THESIS/securellm_cluster-master/output/securellm_domain_v1"
+# Update to your local SecureLLM model path
+SECURELLM_MODEL = "/path/to/securellm_domain"
 QWEN_BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-LLAMA32_1B_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
-GEMMA2_2B_MODEL = "google/gemma-2-2b-it"
-PHI35_MINI_MODEL = "microsoft/Phi-3.5-mini-instruct"
+
+CHECKPOINT_FILE = (PROJECT_ROOT / "benchmark" / "securellm_benchmark_checkpoint.csv")
 
 MAX_NEW_TOKENS = 200
 
 MODELS = [
-        "qwen_base",
-        "securellm_domain_v1",
-        "llama32_1b",
-        "gemma2_2b",
-        "phi35_mini"
-    ]
-
-REFUSAL_PHRASES = [
-        "i am unsure",
-        "i'm unsure",
-        "not enough context",
-        "context does not support",
-        "the context does not support",
-        "i do not know",
-        "i don't know",
-        "not supported by the context",
-    ]
-
-CYBER_TERMS = [
-        "cve", "cvss", "cwe", "exploit", "vulnerability", "malware",
-        "hash", "ransomware", "privilege", "authentication", "patch",
-        "threat", "ioc", "command and control", "remote code execution"
-    ]
-
-UNCERTAINTY_TERMS = [
-        "not sure", "unsure", "uncertain", 
-        "may", "might", "possibly"
-    ]
-
-CATEGORIES = [
-        "fundamentals", "vulnerability_management", "malware_analysis",
-        "network_security", "incident_response", "threat_intelligence",
-        "cloud_identity", "web_security", "security_operations",
-        "advanced_mixed_reasoning"
-    ]
-
-CHECKPOINT_FILE = BASE_DIR / "data" / "securellm_nonRag_benchmark_checkpoint.csv"
+    "qwen_base",
+    "securellm_domain_v1",
+]
 
 # ==========================================================
 # DEVICE
@@ -82,9 +48,6 @@ def load_model(model_name):
     model_map = {
         "qwen_base": QWEN_BASE_MODEL,
         "securellm_domain_v1": SECURELLM_MODEL,
-        "llama32_1b": LLAMA32_1B_MODEL,
-        "gemma2_2b": GEMMA2_2B_MODEL,
-        "phi35_mini": PHI35_MINI_MODEL,
     }
 
     if model_name not in model_map:
@@ -92,18 +55,10 @@ def load_model(model_name):
 
     model_path = model_map[model_name]
 
-    # Only models that actually require remote code
-    use_remote_code = model_name in {
-        "qwen_base",
-        "securellm_domain_v1"
-    }
-
-    is_phi = model_name == "phi35_mini"
-
     print(f"Loading tokenizer for {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
-        trust_remote_code=use_remote_code
+        trust_remote_code=True
     )
 
     if tokenizer.pad_token is None:
@@ -111,33 +66,24 @@ def load_model(model_name):
 
     tokenizer.padding_side = "left"
 
-    load_kwargs = {
-        "trust_remote_code": use_remote_code,
-        "torch_dtype": torch.bfloat16 if device == "cuda" else torch.float32,
-    }
-
     if device == "cuda":
-        load_kwargs["device_map"] = "auto"
-
-    # Force Phi onto eager attention instead of flash attention
-    if is_phi:
-        load_kwargs["attn_implementation"] = "eager"
-
-    print(
-        f"Loading model for {model_name} "
-        f"in {'GPU' if device == 'cuda' else 'CPU'} mode..."
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        **load_kwargs
-    )
-
-    if device != "cuda":
+        print(f"Loading model for {model_name} in GPU mode...")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=True
+        )
+    else:
+        print(f"Loading model for {model_name} in CPU mode...")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=torch.float32,
+            trust_remote_code=True
+        )
         model.to("cpu")
 
     model.eval()
-
     print(f"Model ready: {model_name}")
     return model, tokenizer
 
@@ -160,62 +106,29 @@ def infer_prompt_type(prompt: str) -> str:
         return "explanation"
     return "concept"
 
-def infer_prompt_category(prompt_id: int) -> str:
-    if 1 <= prompt_id <= 1000:
-        return CATEGORIES[(prompt_id - 1) // 100]
-    return "unknown"
 
-# ==========================================================
-# PROMPT
-# ==========================================================
+def build_prompt(user_prompt: str) -> str:
+    return f"""You are SecureLLM, a cybersecurity focused language model.
 
-def build_prompt(user_prompt: str, tokenizer=None, model_name: str = "") -> str:
-    system_instruction = (
-        "You are SecureLLM, a cybersecurity focused language model. "
-        "Answer the question clearly and directly. "
-        "Do not invent facts. "
-        "If you are unsure, say that you are unsure."
-    )
+Answer the question clearly and directly.
+Do not invent facts.
+If you are unsure, say that you are unsure.
 
-    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
-        # Check if this tokenizer supports system role
-        # Phi-3.5, Llama, Qwen all do — but handle gracefully
-        try:
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt},
-            ]
-            return tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-        except Exception:
-            # Fallback: fold system into user if template rejects system role
-            messages = [
-                {"role": "user", "content": f"{system_instruction}\n\n{user_prompt}"},
-            ]
-            return tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
+Question:
+{user_prompt}
 
-    # Raw fallback (no chat template)
-    return (
-        f"<|system|>\n{system_instruction}<|end|>\n"
-        f"<|user|>\n{user_prompt}<|end|>\n"
-        f"<|assistant|>\n"
-    )
+Answer:
+"""
 
 # ==========================================================
 # GENERATE
 # ==========================================================
 
-def generate_response(model, tokenizer, prompt, model_name=""):
-    full_prompt = build_prompt(prompt, tokenizer, model_name=model_name)
+def generate_response(model, tokenizer, prompt):
+    full_prompt = build_prompt(prompt)
 
     model_device = next(model.parameters()).device
+
     inputs = tokenizer(
         full_prompt,
         return_tensors="pt",
@@ -224,7 +137,6 @@ def generate_response(model, tokenizer, prompt, model_name=""):
     )
     inputs = {k: v.to(model_device) for k, v in inputs.items()}
 
-    is_phi = model_name == "phi35_mini"
     start = time.time()
 
     with torch.no_grad():
@@ -232,23 +144,26 @@ def generate_response(model, tokenizer, prompt, model_name=""):
             **inputs,
             max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
-            temperature=None,
-            top_p=None,
-            top_k=None,
-            repetition_penalty=1.3,      # stronger — 1.1 is too weak for Phi
-            no_repeat_ngram_size=4,       # hard-blocks looping n-grams
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            use_cache=not is_phi,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.eos_token_id
         )
 
     latency = time.time() - start
 
-    prompt_len = inputs["input_ids"].shape[-1]
-    decoded = tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
-    response = decoded.strip()
+    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-    for stop_token in ["Question:", "User:", "Assistant:", "### System:", "### User:"]:
+    if "Answer:" in decoded:
+        response = decoded.split("Answer:", 1)[1].strip()
+    else:
+        response = decoded.strip()
+
+    for stop_token in [
+        "Question:",
+        "User:",
+        "Assistant:",
+        "### System:",
+        "### User:",
+    ]:
         if stop_token in response:
             response = response.split(stop_token)[0].strip()
 
@@ -258,37 +173,28 @@ def generate_response(model, tokenizer, prompt, model_name=""):
 # LIGHTWEIGHT AUTO SIGNALS
 # ==========================================================
 
-def contains_refusal(response: str) -> int:
-    lower = response.lower()
-    return int(any(p in lower for p in REFUSAL_PHRASES))
+CYBER_TERMS = [
+    "cve", "cvss", "cwe", "exploit", "vulnerability", "malware",
+    "hash", "ransomware", "privilege", "authentication", "patch",
+    "threat", "ioc", "command and control", "remote code execution"
+]
+
+UNCERTAINTY_TERMS = [
+    "not sure", "unsure", "uncertain", "may", "might", "possibly"
+]
+
 
 def evaluate_lightweight(prompt, response):
-
     response_lower = response.lower()
-    word_count = len(response.split())
 
-    contains_refusal_phrases = contains_refusal(response)
     cyber_term_hits = sum(1 for term in CYBER_TERMS if term in response_lower)
     uncertainty_hits = sum(1 for term in UNCERTAINTY_TERMS if term in response_lower)
-    
-    technical_density = (
-        round(cyber_term_hits / word_count, 4)
-        if word_count > 0 else 0
-    )
-
-    uncertainty_density = (
-        round(uncertainty_hits / word_count, 4)
-        if word_count > 0 else 0
-    )
 
     return {
         "response_length": len(response),
-        "word_count": word_count,
+        "word_count": len(response.split()),
         "cyber_term_hits": cyber_term_hits,
-        "contains_refusal": contains_refusal_phrases,
-        "technical_density": technical_density,
         "uncertainty_hits": uncertainty_hits,
-        "uncertainty_density": uncertainty_density,
     }
 
 # ==========================================================
@@ -318,7 +224,7 @@ def save_results(results, filename):
 def run_benchmark(prompt_file=PROMPT_FILE):
     with open(prompt_file, "r", encoding="utf-8") as f:
         prompts = [p.strip() for p in f if p.strip()]
-        #prompts = [p.strip() for p in f if p.strip()][:5]
+
     print(f"Loaded {len(prompts)} prompts from {prompt_file}")
 
     results = []
@@ -332,13 +238,11 @@ def run_benchmark(prompt_file=PROMPT_FILE):
 
         for prompt_id, prompt in enumerate(prompts, start=1):
             prompt_type = infer_prompt_type(prompt)
-            prompt_category = infer_prompt_category(prompt_id)
 
             response, latency = generate_response(
                 model,
                 tokenizer,
-                prompt,
-                model_name=model_name
+                prompt
             )
 
             auto_eval = evaluate_lightweight(prompt, response)
@@ -346,7 +250,6 @@ def run_benchmark(prompt_file=PROMPT_FILE):
             row = {
                 "prompt_id": prompt_id,
                 "model": model_name,
-                "prompt_category": prompt_category,
                 "prompt_type": prompt_type,
                 "prompt": prompt,
                 "response": response,
@@ -376,7 +279,7 @@ def run_benchmark(prompt_file=PROMPT_FILE):
             torch.cuda.empty_cache()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = BASE_DIR / "data" / f"securellm_nonRag_benchmark_{timestamp}.csv"
+    output_file = (PROJECT_ROOT / "benchmark" / f"securellm_benchmark_{timestamp}.csv")
     save_results(results, output_file)
 
     print("\nBenchmark Complete.")
@@ -388,5 +291,5 @@ def run_benchmark(prompt_file=PROMPT_FILE):
 # ==========================================================
 
 if __name__ == "__main__":
-    print("Starting SecureLLM Non Rag Benchmark...")
+    print("Starting SecureLLM Benchmark...")
     run_benchmark()
