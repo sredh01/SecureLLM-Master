@@ -118,7 +118,7 @@ python benchmark/benchmark_securellm_rag_v1.py
 ```
 Prompt file:
 ```text
-corpus/benchmark_100prompts.txt
+corpus/benchmark_1000prompts.txt
 ```
 
 ## Model Availability
@@ -131,5 +131,5 @@ The repository contains the complete data processing, retrieval, training, and b
 
 If you use SecureLLM in academic work, please cite:
 
-Redhouse, S. (2026).
+Redhouse, S. (2026)., Alsmadi, I.
 SecureLLM: A Retrieval Augmented Framework for Cybersecurity Intelligence Analysis.
